@@ -26,7 +26,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 # Bengaluru – MG Road corridor (swap via .env)
 CENTER_LAT: float = float(os.getenv("CENTER_LAT", "12.9757"))
 CENTER_LON: float = float(os.getenv("CENTER_LON", "77.6011"))
-GRAPH_RADIUS_M: int = int(os.getenv("GRAPH_RADIUS_M", "3200"))
+GRAPH_RADIUS_M: int = int(os.getenv("GRAPH_RADIUS_M", "1500"))
 
 # Default start / end coordinates
 DEFAULT_START: tuple[float, float] = (
@@ -41,8 +41,8 @@ DEFAULT_END: tuple[float, float] = (
 # ---------------------------------------------------------------------------
 # Routing cost weights  (alpha_X: higher = stronger pull toward score)
 # ---------------------------------------------------------------------------
-ALPHA_VIS: float = float(os.getenv("ALPHA_VIS", "50"))
-ALPHA_PRACTICAL: float = float(os.getenv("ALPHA_PRACTICAL", "15"))
+ALPHA_VIS: float = float(os.getenv("ALPHA_VIS", "200"))
+ALPHA_PRACTICAL: float = float(os.getenv("ALPHA_PRACTICAL", "60"))
 ALPHA_FAST: float = float(os.getenv("ALPHA_FAST", "0"))
 
 # ---------------------------------------------------------------------------

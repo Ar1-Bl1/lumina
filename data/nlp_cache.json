@@ -3,5 +3,55 @@
     "severity": 1,
     "category": "other",
     "penalty": -10
+  },
+  "aba5f164fc50985cb4d3aac8f998f751e6be3cf948c78aed233c0fea84f50694": {
+    "severity": 3,
+    "category": "harassment",
+    "penalty": -30
+  },
+  "9b5161e905b519e475b1b576b8edd36a1b9ac12f7f7a0354e7b21d7170b60564": {
+    "severity": 3,
+    "category": "road_hazard",
+    "penalty": -30
+  },
+  "13cd320743c74f87d42a2d6ad8358a86e59274a2b3edfe88b75a463e5779178a": {
+    "severity": 3,
+    "category": "lighting",
+    "penalty": -30
+  },
+  "bfa23a8e8d1de0172ab5bcf9ef964488c28e150ac50801895e554fb109f57998": {
+    "severity": 2,
+    "category": "crowd",
+    "penalty": -20
+  },
+  "95072e84b1f473eb02930ef80238f9089e0ef6765cae651e7932210375cea251": {
+    "severity": 2,
+    "category": "infrastructure",
+    "penalty": -20
+  },
+  "d9d46615ef8d616991abb912d9d386a5d805a90a00f942fc651b464f0e27cdcc": {
+    "severity": 4,
+    "category": "harassment",
+    "penalty": -40
+  },
+  "3188af647b0fa96759948f9ccbc699b18672ef67b01b9dd350c7cf67a3d04cb6": {
+    "severity": 3,
+    "category": "harassment",
+    "penalty": -30
+  },
+  "e82c9d603e2520f119612f12c57a1ddb988484f52eb618bd4314a13d0b7862e1": {
+    "severity": 2,
+    "category": "weather",
+    "penalty": -20
+  },
+  "06753935341d509f9e9baa2f101dd21e51c0729919fe67719f3b68708da82b1b": {
+    "severity": 2,
+    "category": "infrastructure",
+    "penalty": -20
+  },
+  "c9c64e640c644e328d5be5312432a0235a94b05ddd1266b5a1d827f2a0747647": {
+    "severity": 2,
+    "category": "infrastructure",
+    "penalty": -20
   }
 }

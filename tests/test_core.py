@@ -280,6 +280,13 @@ def stub_graph():
 class TestMockDataStructure:
     """Validate the shape of generated mock data using a tiny stub graph."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_mock_output(self, tmp_path, monkeypatch):
+        """Synthetic fixtures must never replace the real cached-map scenario."""
+        mock_path = tmp_path / "mock.json"
+        monkeypatch.setattr("config.MOCK_DATA_PATH", mock_path)
+        monkeypatch.setattr("mock_data.MOCK_DATA_PATH", mock_path)
+
     def test_keys_present(self, stub_graph) -> None:
         from mock_data import generate_mock
         data = generate_mock(stub_graph, seed=42)

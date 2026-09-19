@@ -85,10 +85,7 @@ NAV_PROGRESS = "Navigation in progress…"
 # ---------------------------------------------------------------------------
 # Escort Mode
 # ---------------------------------------------------------------------------
-ESCORT_BANNER = (
-    "⚠️  Entering low-visibility area. Stay vigilant. "
-    "Poll rate increased to 3 s. Contact notified (simulated)."
-)
+ESCORT_BANNER = "Entering low-visibility area. Stay vigilant."
 ESCORT_POLL_LABEL = "Current poll rate"
 ESCORT_CONTACT_LOG = "Emergency contact notified (simulated GPS link sent)."
 ESCORT_SIMULATED_NOTE = "GPS tracking and SMS are simulated in this MVP."
@@ -98,7 +95,7 @@ ESCORT_SIMULATED_NOTE = "GPS tracking and SMS are simulated in this MVP."
 # ---------------------------------------------------------------------------
 EYES_UP_TITLE = "Route Active"
 EYES_UP_BODY = (
-    "Keep your head up and stay vigilant. "
+    "Route active. Keep your head up and stay vigilant. "
     "Audio cues enabled."
 )
 EYES_UP_UNLOCK = "Swipe to unlock map"
@@ -127,3 +124,25 @@ ERR_IDENTICAL_ROUTES = (
 )
 INFO_ROUTES_READY = "Routes calculated. Select a route to begin navigation."
 INFO_FALLBACK_NLP = "Alert classifier running in offline mode (no OpenAI key)."
+
+# Streamlit-only labels and formatting.
+DEMO_MAP = "Demo map (synthetic)"
+ERR_CACHE_MISSING = ('Cached graph unavailable. Run the download from the project folder: '
+                     'venv\\Scripts\\python.exe -c "from graph import load_graph; load_graph()". '
+                     'Using a synthetic demo grid meanwhile.')
+ERR_MOCK = "Could not load data/mock.json. Restore the mock data before continuing."
+LATITUDE = "Latitude"
+LONGITUDE = "Longitude"
+ROUTE_CHOICE = "Choose a route"
+MAP_NETWORK = "Street segments"
+NAV_POSITION = "Simulated position"
+NAV_DONE = "Destination reached (simulated)."
+ERR_CONTACT = "Simulated contact notification could not be recorded."
+ERR_TELEMETRY = "Local telemetry could not be saved; navigation paused."
+WEBHOOK_DISABLED = "External webhook configured; remove WEBHOOK_URL to run simulated navigation."
+WALK_NETWORK_NOTE = "All modes use the walking network; mode changes ETA only."
+DISTANCE_VALUE = "{:.0f} m"
+ETA_VALUE = "{:.1f} min"
+POLL_VALUE = "{} s"
+UNKNOWN_VALUE = "—"
+EYE_ICON = "👁"
