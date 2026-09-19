@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --color-primary: #1a73e8;
+  --color-primary-foreground: #ffffff;
+  --color-safety: #1e8e3e;
+  --color-fastest: #1a73e8;
+  --color-practical: #e37400;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8f9fa;
+  --color-muted: #70757a;
+  --color-border: #dadce0;
+  --font-sans: 'DM Sans', 'Inter', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-sans);
+}
+
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2) !important;
+}
+
+.leaflet-control-zoom a {
+  border-radius: 4px !important;
+  color: #3c4043 !important;
+  font-weight: 600 !important;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 4px;
+}

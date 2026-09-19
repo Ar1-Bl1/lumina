@@ -1,0 +1,10 @@
+{
+  "description": "This interactive mapping application displays multiple routes on MG Road in Bangalore, helping users easily navigate and choose the best path.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
