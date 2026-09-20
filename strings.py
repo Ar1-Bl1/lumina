@@ -11,6 +11,20 @@ from __future__ import annotations
 # App identity
 # ---------------------------------------------------------------------------
 APP_NAME = "Lumina"
+FEEDBACK = {
+    'title': 'How was your route?',
+    'rating_label': 'How would you rate your route?',
+    'well_lit_question': 'Did this route feel well-lit and active?',
+    'well_lit_options': {'yes': 'Yes', 'somewhat': 'Somewhat', 'no': 'No'},
+    'escort_question': 'Did the Escort Mode alert help?',
+    'escort_options': {'helpful': 'Helpful', 'neutral': 'Neutral', 'distracting': 'Distracting'},
+    'comment_label': 'Anything else? (optional)',
+    'comment_hint': "Please don't include personal details.",
+    'submit': 'Send feedback',
+    'skip': 'Skip',
+    'success': 'Thanks. Your feedback helps us improve route visibility.',
+    'error': "Couldn't send feedback. Please try again.",
+}
 APP_TAGLINE = "Environmental Route Visibility Planner"
 APP_DESCRIPTION = (
     "Calculates environmental visibility factors for pedestrians, "

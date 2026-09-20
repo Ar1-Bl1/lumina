@@ -19,13 +19,14 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import networkx as nx
 import osmnx as ox
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pyproj import Transformer
 from shapely.geometry import LineString, Point
 
 import config
 import strings as S
 from escort import LocalJsonlSink, needs_escort, notify_contact, poll_interval
+from feedback import clean_comment, feedback_summary, save_feedback
 from graph import build_chunks, nearest_node
 from routing import find_routes
 from scoring import LOCAL_TZ, score_chunks
@@ -118,7 +119,8 @@ app.add_middleware(CORSMiddleware,
 async def invalid_request(request: Request, exc: RequestValidationError):
     errors = [{'field': '.'.join(map(str, e['loc'])), 'message': e['msg']}
               for e in exc.errors()]
-    return JSONResponse(status_code=400, content={'detail': errors})
+    return JSONResponse(status_code=422 if request.url.path.rstrip('/') == '/feedback' else 400,
+                        content={'detail': errors})
 
 
 @app.get('/config')
@@ -129,7 +131,40 @@ def get_config():
                       ('ESCORT_THRESHOLD', 'POLL_NORMAL_S', 'POLL_ESCORT_S', 'EYES_UP_DELAY_S')},
         'default_start': config.DEFAULT_START, 'default_end': config.DEFAULT_END,
         'map_center': [config.CENTER_LAT, config.CENTER_LON],
+        'feedback': S.FEEDBACK,
     }
+
+
+class Feedback(BaseModel):
+    rating: int = Field(ge=1, le=5, strict=True)
+    well_lit: Literal['yes', 'somewhat', 'no']
+    escort_helpful: Literal['helpful', 'neutral', 'distracting'] | None = None
+    comment: str | None = Field(default=None, max_length=500)
+    route_id: Literal['fastest', 'practical', 'visibility']
+    mode: Literal['pedestrian', 'cyclist', 'runner']
+    hour: int = Field(ge=0, le=23, strict=True)
+    escort_triggered: bool = Field(strict=True)
+    min_score: float | None = Field(default=None, allow_inf_nan=False)
+    length_m: float | None = Field(default=None, allow_inf_nan=False)
+
+    @field_validator('comment')
+    @classmethod
+    def sanitize_comment(cls, value):
+        return clean_comment(value) if value is not None else None
+
+
+@app.post('/feedback')
+def post_feedback(body: Feedback):
+    try:
+        record = save_feedback(body.model_dump(), config.LOGS_DIR / 'feedback.jsonl')
+    except OSError as exc:
+        raise HTTPException(500, S.FEEDBACK['error']) from exc
+    return {'ok': True, 'id': record['id']}
+
+
+@app.get('/feedback/summary')
+def get_feedback_summary():
+    return feedback_summary(config.LOGS_DIR / 'feedback.jsonl')
 
 
 @app.get('/routes')
