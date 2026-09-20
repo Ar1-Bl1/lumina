@@ -1,6 +1,20 @@
 export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 export type Coordinate = [number, number];
+export type FeedbackBody = {
+  rating: number; well_lit: 'yes' | 'somewhat' | 'no';
+  escort_helpful?: 'helpful' | 'neutral' | 'distracting'; comment: string;
+  route_id: 'fastest' | 'practical' | 'visibility'; mode: 'pedestrian' | 'cyclist' | 'runner';
+  hour: number; escort_triggered: boolean; min_score: number; length_m: number;
+};
+export type FeedbackContext = Omit<FeedbackBody, 'rating' | 'well_lit' | 'escort_helpful' | 'comment'>;
+export type FeedbackStrings = {
+  title: string; rating_label: string; well_lit_question: string;
+  well_lit_options: Record<FeedbackBody['well_lit'], string>;
+  escort_question: string; escort_options: Record<NonNullable<FeedbackBody['escort_helpful']>, string>;
+  comment_label: string; comment_hint: string; submit: string; skip: string; success: string; error: string;
+};
 export type Config = {
+  feedback: FeedbackStrings;
   strings: Record<string, string> & { MODE_OPTIONS: string[]; MODE_TO_KEY: Record<string, string> };
   constants: { ESCORT_THRESHOLD: number; POLL_NORMAL_S: number; POLL_ESCORT_S: number; EYES_UP_DELAY_S: number };
   default_start: Coordinate; default_end: Coordinate; map_center: Coordinate;
@@ -33,6 +47,7 @@ export const getRoutes = (start: Coordinate, end: Coordinate, mode: string, sign
   request<{ routes: ApiRoute[] }>('/routes?' + new URLSearchParams({ start_lat: String(start[0]), start_lon: String(start[1]), end_lat: String(end[0]), end_lon: String(end[1]), mode }), { signal });
 export const getOverlay = (signal?: AbortSignal) => request<Overlay>('/overlay', { signal });
 const post = <T,>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+export const postFeedback = (body: FeedbackBody, signal?: AbortSignal) => post<{ ok: boolean; id: string }>('/feedback', body, signal);
 export const postTelemetry = (body: { lat: number; lon: number; route_id: string; escort_active: boolean }, signal?: AbortSignal) => post<{ ok: boolean }>('/telemetry', body, signal);
 export const postNotify = (phone: string, route_id: string, signal?: AbortSignal) => post<{ tracking_link: string }>('/notify', { phone, route_id }, signal);
 export function parseCoordinate(value: string): Coordinate | null {

@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef, useCallback, createContext, useCo
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { getTimes } from 'suncalc';
+import FeedbackModal from './FeedbackModal';
+import type { FeedbackContext } from './api';
 import { getConfig, getRoutes, getOverlay, postNotify, postTelemetry, adaptRoute, parseCoordinate, type Config, type Route, type Overlay, type Coordinate } from './api';
 const DataContext = createContext<{ config: Config; routes: Route[] }>(null!);
 const useData = () => useContext(DataContext);
@@ -826,7 +828,23 @@ function Lumina({ config }: { config: Config }) {
   const [eyesDim, setEyesDim] = useState(false);
   const navSession = useRef<AbortController | null>(null);
   const starting = useRef(false);
+  const feedbackSession = useRef<{ context: FeedbackContext; opened: boolean } | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackContext, setFeedbackContext] = useState<FeedbackContext | null>(null);
+  const closeFeedback = useCallback(() => setFeedbackOpen(false), []);
   const selected = ROUTES.find(r => r.id === activeRoute);
+  const snapshotFeedback = (route: Route, escortTriggered: boolean): FeedbackContext => ({
+    route_id: route.id as FeedbackContext['route_id'],
+    mode: mode === 'bike' ? 'cyclist' : mode === 'run' ? 'runner' : 'pedestrian',
+    hour: Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: 'numeric', hourCycle: 'h23' }).format(new Date())),
+    escort_triggered: escortTriggered, min_score: route.min_score, length_m: route.length_m,
+  });
+  const openFeedback = () => {
+    const session = feedbackSession.current;
+    if (session) session.opened = true;
+    setFeedbackContext(session?.context ?? (selected ? snapshotFeedback(selected, false) : null));
+    setFeedbackOpen(true);
+  };
   const escortActive = navigating && !!selected?.needs_escort;
   const pollRate = escortActive ? config.constants.POLL_ESCORT_S : config.constants.POLL_NORMAL_S;
   const setActiveRoute = (id: string) => { if (!navigating && !starting.current) { selectRoute(id); setPosition(null); } };
@@ -867,10 +885,16 @@ function Lumina({ config }: { config: Config }) {
   const stopNavigation = useCallback(() => {
     navSession.current?.abort(); starting.current = false;
     setNavigating(false); setSidebarOpen(true); setEyesDim(false); setScreen('map');
+    const session = feedbackSession.current;
+    if (session && !session.opened) {
+      session.opened = true;
+      setFeedbackContext(session.context); setFeedbackOpen(true);
+    }
   }, []);
   const startNavigation = () => {
     if (!termsAccepted || !selected || loading || error || navigating || starting.current) return;
     starting.current = true;
+    feedbackSession.current = { context: snapshotFeedback(selected, selected.needs_escort), opened: false };
     navSession.current?.abort();
     const controller = new AbortController(); navSession.current = controller;
     setNavError(''); setNotified(false); setPosition(selected.coords[0]);
@@ -903,6 +927,7 @@ function Lumina({ config }: { config: Config }) {
         .catch((e: Error) => {
           if (!controller.signal.aborted) { setNavError(e.message + ' ? ' + config.strings.ERR_TELEMETRY); stopNavigation(); }
         });
+      if (index >= selected.coords.length) stopNavigation();
     }, 1000);
     return () => clearInterval(tick);
   }, [navigating, selected, config, stopNavigation]);
@@ -924,7 +949,7 @@ function Lumina({ config }: { config: Config }) {
     <div className="relative w-screen h-screen overflow-hidden"
       style={{ background:'#0f1117', fontFamily:"'DM Sans','Inter',sans-serif" }}>
 
-      <div inert={!termsAccepted || showTermsModal} style={{ display: 'contents' }}>
+      <div inert={!termsAccepted || showTermsModal || feedbackOpen} style={{ display: 'contents' }}>
       {/* Map */}
       {termsAccepted && <MapContainer center={config.map_center} zoom={15} zoomControl={false}
         style={{ position:'absolute', inset:0, zIndex:0 }}>
@@ -1005,6 +1030,8 @@ function Lumina({ config }: { config: Config }) {
       )}
 
       {/* Account button */}
+      <button onClick={openFeedback} className="absolute top-4 right-[68px] z-[210] rounded-full px-3 py-2.5 text-xs font-medium text-white"
+        style={{ background: 'rgba(19,21,31,0.88)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.1)' }}>Feedback</button>
       <div className="absolute top-4 right-4 z-[120]">
         <button onClick={() => setSettingsOpen(o => !o)}
           className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white transition-all"
@@ -1032,6 +1059,7 @@ function Lumina({ config }: { config: Config }) {
       {navError && <div role="alert" className="absolute bottom-36 left-4 z-[170] rounded-xl px-4 py-3 text-sm text-red-400 bg-[#13151f]">{navError}</div>}
       {accountPanel && <AccountPanelModal panel={accountPanel} onClose={() => setAccountPanel(null)} />}
       </div>
+      {feedbackOpen && <FeedbackModal strings={config.feedback} context={feedbackContext} onClose={closeFeedback} />}
       {showTermsModal && (
         <TermsModal
           onAccept={!termsAccepted ? handleAcceptTerms : undefined}
