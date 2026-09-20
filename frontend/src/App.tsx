@@ -14,6 +14,7 @@ L.Icon.Default.mergeOptions({
 });
 
 const SIDEBAR_W = 380;
+const ESCORT_MESSAGE = 'Entering low-visibility area. Stay vigilant.';
 
 type DayPhase = 'day' | 'golden' | 'twilight' | 'night';
 type Screen = 'map' | 'escort' | 'eyesup' | 'stats';
@@ -543,49 +544,47 @@ function EscortModeBanner({ sidebarOpen, onDeactivate, route, notified }: { side
   const secs = (elapsed%60).toString().padStart(2,'0');
 
   return (
-    <div className="absolute top-4 right-4 z-40 pointer-events-none"
-      style={{ left: sidebarOpen ? `${SIDEBAR_W+16}px` : '16px', transition:'left 0.3s cubic-bezier(0.4,0,0.2,1)' }}>
-      <div className="rounded-2xl overflow-hidden pointer-events-auto"
-        style={{ background:'rgba(239,68,68,0.12)', border:'1.5px solid rgba(239,68,68,0.45)', backdropFilter:'blur(16px)', boxShadow:'0 4px 32px rgba(239,68,68,0.18)' }}>
-        <div className="flex items-start gap-3 px-4 py-3">
-          <div className="relative flex-shrink-0 mt-1">
-            <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-red-500 animate-ping opacity-60" />
-          </div>
+    <div className={`escort-banner-position${sidebarOpen ? ' escort-sidebar-open' : ''}`}>
+      <div aria-hidden="true" className="escort-viewport-glow" />
+      <div className="escort-banner rounded-2xl overflow-hidden pointer-events-auto">
+        <div className="flex flex-wrap items-start gap-3 px-4 py-3">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-sm font-bold text-red-400">Escort Mode Active</span>
-              <span className="text-xs font-mono text-red-400/70 tabular-nums">{mins}:{secs}</span>
+            <div className="flex items-start gap-2 mb-2">
+              <span className="shrink-0" aria-hidden="true"><Icon name="warning" size={32} color="white" /></span>
+              <h2 className="text-2xl font-bold uppercase leading-tight">Escort Mode Active</h2>
             </div>
-            <p className="text-xs leading-relaxed" style={{ color:'rgba(255,255,255,0.6)' }}>
-              {S.ESCORT_BANNER}
+            <p className="text-lg leading-relaxed">
+              {ESCORT_MESSAGE}
             </p>
           </div>
-          <button onClick={onDeactivate} className="flex-shrink-0 text-xs px-2.5 py-1 rounded-lg"
-            style={{ background:'rgba(239,68,68,0.2)', color:'rgba(239,68,68,0.8)', border:'1px solid rgba(239,68,68,0.3)' }}>
-            End
-          </button>
+          <div className="flex w-full items-center justify-end gap-3">
+            <span className="text-base font-mono tabular-nums">{mins}:{secs}</span>
+            <button onClick={onDeactivate} className="shrink-0 text-sm font-bold px-4 py-2 rounded-lg"
+              style={{ background:'#750012', color:'#ffffff', border:'2px solid #ffffff', minHeight:44 }}>
+              End
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-3" style={{ borderTop:'1px solid rgba(239,68,68,0.18)' }}>
+        <div className="grid grid-cols-3" style={{ background:'#750012', borderTop:'1px solid #ffffff' }}>
           {[
             { icon:'gps',    label:S.SIM_GPS, value:`${C.POLL_ESCORT_S} s` },
             { icon:'signal', label:S.SIM_CLOUD, value:'Simulated'     },
             { icon:'bell',   label:S.SIM_SMS, value:notified ? 'Recorded' : 'Pending'    },
           ].map(({ icon, label, value }) => (
-            <div key={label} className="flex flex-col items-center py-2.5 text-center" style={{ borderRight:'1px solid rgba(239,68,68,0.12)' }}>
-              <span className="mb-1" style={{ color:'rgba(239,68,68,0.6)' }}><Icon name={icon} size={13} color="currentColor" /></span>
-              <span className="text-[10px] font-semibold" style={{ color:'rgba(239,68,68,0.8)' }}>{value}</span>
-              <span className="text-[9px]" style={{ color:'rgba(255,255,255,0.35)' }}>{label}</span>
+            <div key={label} className="flex min-w-0 flex-col items-center px-1 py-2.5 text-center" style={{ borderRight:'1px solid #ffffff' }}>
+              <span className="mb-1"><Icon name={icon} size={16} color="currentColor" /></span>
+              <span className="text-sm font-semibold">{value}</span>
+              <span className="text-xs">{label}</span>
             </div>
           ))}
         </div>
       </div>
       <div className="mt-2 rounded-xl px-4 py-2.5 flex items-center gap-3"
-        style={{ background:'rgba(251,146,60,0.1)', border:'1px solid rgba(251,146,60,0.28)', backdropFilter:'blur(12px)' }}>
-        <span style={{ color:'rgba(251,146,60,0.7)', flexShrink:0 }}><Icon name="warning" size={15} color="currentColor" /></span>
-        <div>
-          <span className="text-xs font-semibold text-orange-400">{S.METRIC_MIN_SCORE}: {route.min_score.toFixed(1)} / 100 </span>
-          <span className="text-xs" style={{ color:'rgba(255,255,255,0.4)' }}>— threshold {C.ESCORT_THRESHOLD}</span>
+        style={{ background:'#FFB300', color:'#211500', border:'1px solid #211500' }}>
+        <span style={{ flexShrink:0 }}><Icon name="warning" size={15} color="currentColor" /></span>
+        <div className="min-w-0 text-sm font-bold">
+          <span>{S.METRIC_MIN_SCORE}: {route.min_score.toFixed(1)} / 100 </span>
+          <span>— threshold {C.ESCORT_THRESHOLD}</span>
         </div>
       </div>
     </div>
@@ -877,6 +876,15 @@ function Lumina({ config }: { config: Config }) {
     setNavError(''); setNotified(false); setPosition(selected.coords[0]);
     setUnlockUntil(0); setEyesDim(false); setNavigating(true); setSidebarOpen(false); setScreen('map');
     if (selected.needs_escort) {
+      // This guarded start runs once per navigation session, independent of rerenders.
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate([200, 100, 200]);
+      } catch { /* Optional device feedback must not interrupt navigation. */ }
+      try {
+        if (typeof window !== 'undefined' && typeof window.SpeechSynthesisUtterance === 'function' && typeof window.speechSynthesis?.speak === 'function') {
+          window.speechSynthesis.speak(new window.SpeechSynthesisUtterance(ESCORT_MESSAGE));
+        }
+      } catch { /* Speech may be unavailable or blocked by the browser. */ }
       postNotify(phone, selected.id, controller.signal).then(() => {
         if (!controller.signal.aborted) setNotified(true);
       }).catch((e: Error) => { if (!controller.signal.aborted) setNavError(e.message + ' ? ' + config.strings.ERR_CONTACT); });

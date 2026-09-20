@@ -52,3 +52,45 @@ body {
   background: #dadce0;
   border-radius: 4px;
 }
+
+.escort-banner-position {
+  position: sticky;
+  top: 16px;
+  z-index: 190;
+  margin-left: 16px;
+  margin-right: 72px;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 768px) {
+  .escort-banner-position.escort-sidebar-open {
+    margin-left: 396px;
+  }
+}
+
+.escort-banner {
+  background: #B3001B;
+  color: #ffffff;
+  border: 4px solid #ffffff;
+  animation: escort-banner-glow 1.2s ease-in-out infinite;
+}
+
+.escort-viewport-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px #ff243b, inset 0 0 14px #ff243b;
+}
+
+@keyframes escort-banner-glow {
+  0%, 100% { box-shadow: 0 0 8px #ff243b; }
+  50% { box-shadow: 0 0 24px #ff243b; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .escort-banner {
+    animation: none;
+    box-shadow: 0 0 8px #ff243b;
+  }
+}
