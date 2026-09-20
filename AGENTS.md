@@ -12,3 +12,13 @@ Rules:
 
 \- Reply in 5 lines max unless asked. No long explanations.
 
+
+
+Frontend rules:
+
+\- The Figma-built frontend in frontend is the approved design. Don't restyle, restructure or replace it. Only wire data and behavior into it, and add the minimum new components needed.
+
+\- You have no internet: never run npm install. If a new dependency is needed, list it and I'll install it.
+
+\- Never use the words "safest", "danger-free", "secure path" or "guarantee" in any UI text.
+

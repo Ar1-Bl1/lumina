@@ -1,7 +1,10 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { getTimes } from 'suncalc';
+import { getConfig, getRoutes, getOverlay, postNotify, postTelemetry, adaptRoute, parseCoordinate, type Config, type Route, type Overlay, type Coordinate } from './api';
+const DataContext = createContext<{ config: Config; routes: Route[] }>(null!);
+const useData = () => useContext(DataContext);
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -10,8 +13,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-const BANGALORE_LAT = 12.9716;
-const BANGALORE_LNG = 77.5946;
 const SIDEBAR_W = 380;
 
 type DayPhase = 'day' | 'golden' | 'twilight' | 'night';
@@ -20,8 +21,8 @@ type AccountPanel = 'account' | 'notifications' | 'savedroutes' | null;
 
 function ts(d: Date | null) { return d ? d.getTime() : 0; }
 
-function getDayPhase(now: Date): DayPhase {
-  const t = getTimes(now, BANGALORE_LAT, BANGALORE_LNG);
+function getDayPhase(now: Date, center: Coordinate): DayPhase {
+  const t = getTimes(now, ...center);
   const ms = now.getTime();
   if (ms >= ts(t.goldenHourEnd) && ms < ts(t.goldenHour)) return 'day';
   if ((ms >= ts(t.goldenHour) && ms < ts(t.sunsetStart)) || (ms >= ts(t.sunriseEnd) && ms < ts(t.goldenHourEnd))) return 'golden';
@@ -29,50 +30,12 @@ function getDayPhase(now: Date): DayPhase {
   return 'night';
 }
 
-const TILE: Record<DayPhase, { url: string; label: string }> = {
-  day:      { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',          label: 'Daylight'    },
-  golden:   { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',          label: 'Golden Hour' },
-  twilight: { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_dark_all/{z}/{x}/{y}{r}.png', label: 'Twilight'    },
-  night:    { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',                     label: 'Night'       },
+const TILE: Record<DayPhase, { label: string }> = {
+  day:      { label: 'Daylight'    },
+  golden:   { label: 'Golden Hour' },
+  twilight: { label: 'Twilight'    },
+  night:    { label: 'Night'       },
 };
-
-const ROUTES = [
-  {
-    id: 'visibility', name: 'Visibility-Optimized', tagline: 'Well-lit · High vitality',
-    color: '#22c55e', duration: '18 min', distance: '1.8 km', safetyScore: 92, safetyLabel: 'Excellent',
-    coords: [[12.976,77.607],[12.9762,77.6055],[12.9758,77.604],[12.9748,77.603],[12.9735,77.6035],[12.9722,77.6045],[12.9712,77.6065],[12.9702,77.609],[12.9692,77.6118],[12.9685,77.6145]],
-    highlights: ['Brigade Road (well-lit)', '3 transit stops nearby', 'High foot traffic'],
-    segments: [
-      { name: 'MG Road Metro → St Marks Rd', score: 94, dist: '0.4 km', status: 'Excellent' },
-      { name: 'St Marks Rd → Brigade Rd',    score: 91, dist: '0.6 km', status: 'Excellent' },
-      { name: 'Brigade Rd → Trinity Circle', score: 88, dist: '0.8 km', status: 'Good'      },
-    ],
-    dangerSegment: false,
-  },
-  {
-    id: 'fastest', name: 'Fastest Route', tagline: 'Shortest path · Direct',
-    color: '#60a5fa', duration: '12 min', distance: '1.2 km', safetyScore: 65, safetyLabel: 'Moderate',
-    coords: [[12.976,77.607],[12.9748,77.6082],[12.973,77.6098],[12.9714,77.6118],[12.9685,77.6145]],
-    highlights: ['Along MG Road', '2 crossings', 'Moderate lighting'],
-    segments: [
-      { name: 'MG Road Metro → Infantry Rd',  score: 72, dist: '0.5 km', status: 'Good'   },
-      { name: 'Infantry Rd → Trinity Circle', score: 24, dist: '0.7 km', status: 'Danger' },
-    ],
-    dangerSegment: true,
-  },
-  {
-    id: 'practical', name: 'Practical Route', tagline: 'Balanced · Time & visibility',
-    color: '#fb923c', duration: '15 min', distance: '1.5 km', safetyScore: 78, safetyLabel: 'Good',
-    coords: [[12.976,77.607],[12.9755,77.606],[12.9744,77.6072],[12.973,77.609],[12.9715,77.6108],[12.9698,77.6126],[12.9685,77.6145]],
-    highlights: ['Church Street stretch', '1 transit stop nearby', 'Mixed lighting'],
-    segments: [
-      { name: 'MG Road Metro → Church St',     score: 82, dist: '0.5 km', status: 'Good' },
-      { name: 'Church St → Residency Rd',      score: 76, dist: '0.5 km', status: 'Good' },
-      { name: 'Residency Rd → Trinity Circle', score: 74, dist: '0.5 km', status: 'Good' },
-    ],
-    dangerSegment: false,
-  },
-];
 
 function formatTime(d: Date | null) {
   if (!d) return '--:--';
@@ -144,11 +107,11 @@ function ScoreBar({ score, color, bg = 'rgba(255,255,255,0.1)' }: { score: numbe
 
 function MapFocus({ activeId }: { activeId: string }) {
   const map = useMap();
+  const { routes: ROUTES } = useData();
   useEffect(() => {
-    const r = ROUTES.find(r => r.id === activeId);
-    if (!r) return;
-    map.fitBounds(L.latLngBounds(r.coords as [number, number][]), { padding: [80, 120] });
-  }, [activeId, map]);
+    if (!ROUTES.length) return;
+    map.fitBounds(L.latLngBounds(ROUTES.flatMap(r => r.coords)), { padding: [80, 120] });
+  }, [activeId, map, ROUTES]);
   return null;
 }
 
@@ -162,6 +125,7 @@ function dotIcon(color: string, size = 20) {
 
 // ─── TERMS MODAL ──────────────────────────────────────────────────────────────
 function TermsModal({ onAccept, onClose }: { onAccept?: () => void; onClose: () => void }) {
+  const { config: { strings: S } } = useData();
   const [checked, setChecked] = useState(false);
   const isInitial = !!onAccept;
   return (
@@ -182,43 +146,31 @@ function TermsModal({ onAccept, onClose }: { onAccept?: () => void; onClose: () 
           )}
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold mx-auto mb-4"
             style={{ background:'linear-gradient(135deg,#1a73e8,#22c55e)' }}>L</div>
-          <h1 className="text-xl font-bold text-white mb-1">Terms &amp; Conditions</h1>
-          <p className="text-sm" style={{ color:'rgba(255,255,255,0.4)' }}>Lumina · Visibility-aware navigation</p>
+          <h1 className="text-xl font-bold text-white mb-1">{S.TOS_TITLE}</h1>
+          <p className="text-sm" style={{ color:'rgba(255,255,255,0.4)' }}>{S.APP_TAGLINE}</p>
         </div>
         <div className="relative px-8 py-6 overflow-y-auto flex-1">
           <p className="text-sm font-semibold text-white mb-3">Please read carefully before you start:</p>
           <div className="rounded-xl p-4 mb-5 text-sm leading-relaxed space-y-3"
             style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
-            <p style={{ color:'rgba(255,255,255,0.7)' }}>Lumina <strong className="text-white">aggregates environmental data</strong> to calculate route visibility scores based on lighting, foot traffic, and proximity to active establishments.</p>
-            <p style={{ color:'rgba(255,255,255,0.7)' }}>Urban conditions change rapidly. Scores reflect data at query time and <strong className="text-white">may not reflect real-time hazards</strong>.</p>
-            <p style={{ color:'rgba(255,255,255,0.6)' }}>This is an <strong className="text-white">informational tool only</strong> — not a substitute for personal vigilance or emergency services.</p>
+            <p style={{ color:'rgba(255,255,255,0.7)' }}>{S.TOS_BODY}</p>
           </div>
-          {[
-            { icon:'shield', text:'Visibility-Optimized routes optimize for environmental factors, not guaranteed safety' },
-            { icon:'signal', text:'Escort Mode logging requires consent and may share location with emergency contacts' },
-            { icon:'warning',text:'Always trust your instincts over any app recommendation' },
-          ].map(({ icon, text }) => (
-            <div key={text} className="flex items-start gap-3 text-xs mb-3" style={{ color:'rgba(255,255,255,0.5)' }}>
-              <span className="flex-shrink-0 mt-0.5" style={{ color:'rgba(255,255,255,0.35)' }}><Icon name={icon} size={14} color="currentColor" /></span>
-              <span>{text}</span>
-            </div>
-          ))}
           {isInitial && (
             <>
               <label className="flex items-start gap-3 cursor-pointer mt-5 mb-6">
-                <div onClick={() => setChecked(!checked)}
+                <button type="button" role="checkbox" aria-checked={checked} aria-label={S.TOS_CHECKBOX} onClick={() => setChecked(!checked)}
                   className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5 transition-all"
                   style={{ background:checked?'#22c55e':'transparent', border:checked?'2px solid #22c55e':'2px solid rgba(255,255,255,0.25)' }}>
                   {checked && <Icon name="check" size={10} color="white" strokeWidth={2.5} />}
-                </div>
-                <span className="text-sm" style={{ color:'rgba(255,255,255,0.7)' }}>I understand this is an informational tool and accept full responsibility for my personal safety.</span>
+                </button>
+                <span className="text-sm" style={{ color:'rgba(255,255,255,0.7)' }}>{S.TOS_CHECKBOX}</span>
               </label>
               <div className="flex gap-3">
                 <button className="flex-1 py-3 rounded-xl text-sm font-medium"
                   style={{ background:'rgba(255,255,255,0.06)', color:'rgba(255,255,255,0.4)', border:'1px solid rgba(255,255,255,0.08)' }}>Decline</button>
-                <button onClick={() => checked && onAccept?.()} className="flex-1 py-3 rounded-xl text-sm font-bold transition-all"
+                <button disabled={!checked} onClick={() => checked && onAccept?.()} className="flex-1 py-3 rounded-xl text-sm font-bold transition-all"
                   style={{ background:checked?'#22c55e':'rgba(34,197,94,0.12)', color:checked?'#0f1117':'rgba(34,197,94,0.35)', cursor:checked?'pointer':'not-allowed' }}>
-                  I Agree &amp; Continue
+                  {S.TOS_PROCEED}
                 </button>
               </div>
             </>
@@ -262,65 +214,25 @@ function AccountPanelModal({ panel, onClose }: { panel: AccountPanel; onClose: (
           <div className="px-6 py-5 space-y-3">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-                style={{ background:'linear-gradient(135deg,#3b82f6,#8b5cf6)' }}>AK</div>
+                style={{ background:'linear-gradient(135deg,#3b82f6,#8b5cf6)' }}>L</div>
               <div>
-                <div className="text-sm font-semibold text-white">Ananya Kumar</div>
-                <div className="text-xs" style={{ color:'rgba(255,255,255,0.45)' }}>ananya.k@email.com</div>
+                <div className="text-sm font-semibold text-white">Guest</div>
+                <div className="text-xs" style={{ color:'rgba(255,255,255,0.45)' }}>Local session</div>
               </div>
             </div>
-            {[['Emergency Contact','Priya Kumar · +91 98765 43210'],['Home Address','Koramangala, Bengaluru'],['Member Since','September 2026']].map(([label, val]) => (
-              <div key={label} className="rounded-xl px-4 py-3" style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
-                <div className="text-[10px] uppercase tracking-wider mb-0.5" style={{ color:'rgba(255,255,255,0.35)' }}>{label}</div>
-                <div className="text-sm text-white">{val}</div>
-              </div>
-            ))}
-            <button className="w-full py-2.5 rounded-xl text-sm font-semibold mt-1"
-              style={{ background:'rgba(59,130,246,0.12)', color:'#60a5fa', border:'1px solid rgba(59,130,246,0.25)' }}>Edit Profile</button>
+            <p className="text-sm text-white">Account services are unavailable in this API.</p>
           </div>
         )}
 
         {panel === 'notifications' && (
           <div className="px-6 py-5 space-y-2.5">
-            {[
-              { label:'Escort Mode Alerts',     sub:'Notify emergency contact automatically',      on:true  },
-              { label:'Low Visibility Warnings', sub:'Alert when segment score drops below 30',    on:true  },
-              { label:'Route Updates',           sub:'Real-time route condition changes',          on:false },
-              { label:'Daily Safety Digest',     sub:'Morning summary of your area',              on:false },
-            ].map(({ label, sub, on }) => (
-              <div key={label} className="flex items-center justify-between rounded-xl px-4 py-3"
-                style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
-                <div>
-                  <div className="text-sm text-white">{label}</div>
-                  <div className="text-[10px]" style={{ color:'rgba(255,255,255,0.4)' }}>{sub}</div>
-                </div>
-                <div className="w-10 h-6 rounded-full flex-shrink-0 relative cursor-pointer transition-all"
-                  style={{ background:on?'#22c55e':'rgba(255,255,255,0.1)' }}>
-                  <div className="absolute top-1 w-4 h-4 rounded-full bg-white transition-all" style={{ left:on?'22px':'2px' }} />
-                </div>
-              </div>
-            ))}
+            <p className="text-sm text-white">Escort notifications are simulated during navigation.</p>
           </div>
         )}
 
         {panel === 'savedroutes' && (
           <div className="px-6 py-5 space-y-2">
-            {[
-              { from:'MG Road Metro', to:'Trinity Circle', type:'Visibility-Optimized', color:'#22c55e', date:'Today'       },
-              { from:'Koramangala',   to:'Indiranagar',    type:'Practical Route',       color:'#fb923c', date:'Yesterday'  },
-              { from:'Whitefield',    to:'MG Road',        type:'Fastest Route',         color:'#60a5fa', date:'3 days ago' },
-            ].map(({ from, to, type, color, date }) => (
-              <div key={from+to} className="rounded-xl px-4 py-3" style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)' }}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold" style={{ color }}>{type}</span>
-                  <span className="text-[10px]" style={{ color:'rgba(255,255,255,0.35)' }}>{date}</span>
-                </div>
-                <div className="text-sm text-white">{from} → {to}</div>
-              </div>
-            ))}
-            <button className="w-full py-2.5 rounded-xl text-sm font-semibold mt-1"
-              style={{ background:'rgba(255,255,255,0.05)', color:'rgba(255,255,255,0.5)', border:'1px solid rgba(255,255,255,0.08)' }}>
-              + Plan New Route
-            </button>
+            <p className="text-sm text-white">Saved routes are unavailable in this API.</p>
           </div>
         )}
       </div>
@@ -349,10 +261,10 @@ function SettingsMenu({ onOpenTerms, onOpenPanel, onClose }: {
       <div className="px-4 py-4" style={{ borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-            style={{ background:'linear-gradient(135deg,#3b82f6,#8b5cf6)' }}>AK</div>
+            style={{ background:'linear-gradient(135deg,#3b82f6,#8b5cf6)' }}>L</div>
           <div>
-            <div className="text-sm font-semibold text-white">Ananya Kumar</div>
-            <div className="text-[11px]" style={{ color:'rgba(255,255,255,0.4)' }}>ananya.k@email.com</div>
+            <div className="text-sm font-semibold text-white">Guest</div>
+            <div className="text-[11px]" style={{ color:'rgba(255,255,255,0.4)' }}>Local session</div>
           </div>
         </div>
       </div>
@@ -360,7 +272,7 @@ function SettingsMenu({ onOpenTerms, onOpenPanel, onClose }: {
         {([
           { icon:'person',   label:'My Account',    sub:'Profile & preferences',    panel:'account'       },
           { icon:'bell',     label:'Notifications', sub:'Alerts & escort contacts', panel:'notifications' },
-          { icon:'bookmark', label:'Saved Routes',  sub:'3 routes saved',           panel:'savedroutes'   },
+          { icon:'bookmark', label:'Saved Routes',  sub:'Not available',           panel:'savedroutes'   },
         ] as { icon:string; label:string; sub:string; panel:AccountPanel }[]).map(({ icon, label, sub, panel }) => (
           <button key={label} onClick={() => { onOpenPanel(panel); onClose(); }}
             className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5">
@@ -395,8 +307,9 @@ function SettingsMenu({ onOpenTerms, onOpenPanel, onClose }: {
 // ─── LEFT PANEL ───────────────────────────────────────────────────────────────
 function LeftPanel({
   activeRoute, setActiveRoute, phase, now, sunTimes, navigating, onStartNav, onStopNav,
-  sidebarOpen, setSidebarOpen, fromLocation, setFromLocation, toLocation, setToLocation,
+  sidebarOpen, setSidebarOpen, fromLocation, setFromLocation, toLocation, setToLocation, loading, error, mode, setMode, overlayOn, setOverlayOn, phone, setPhone, pollRate, onRetry,
 }: {
+  onRetry: () => void; loading: boolean; error: string; mode: string; setMode: (s: string) => void; overlayOn: boolean; setOverlayOn: (b: boolean) => void; phone: string; setPhone: (s: string) => void; pollRate: number;
   activeRoute: string; setActiveRoute: (id: string) => void;
   phase: DayPhase; now: Date; sunTimes: ReturnType<typeof getTimes>;
   navigating: boolean; onStartNav: () => void; onStopNav: () => void;
@@ -404,7 +317,8 @@ function LeftPanel({
   fromLocation: string; setFromLocation: (v: string) => void;
   toLocation: string; setToLocation: (v: string) => void;
 }) {
-  const active = ROUTES.find(r => r.id === activeRoute)!;
+  const { routes: ROUTES, config: { strings: S } } = useData();
+  const active = ROUTES.find(r => r.id === activeRoute);
 
   return (
     <>
@@ -425,7 +339,7 @@ function LeftPanel({
                 style={{ background:'linear-gradient(135deg,#3b82f6,#22c55e)' }}>L</div>
               <div>
                 <div className="text-sm font-semibold text-white">Lumina</div>
-                <div className="text-[10px] leading-none" style={{ color:'rgba(255,255,255,0.4)' }}>Visibility-aware navigation</div>
+                <div className="text-[10px] leading-none" style={{ color:'rgba(255,255,255,0.4)' }}>{S.APP_TAGLINE}</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -465,7 +379,7 @@ function LeftPanel({
               <input
                 value={fromLocation}
                 onChange={e => setFromLocation(e.target.value)}
-                placeholder="Starting point"
+                aria-label={S.SIDEBAR_START} placeholder={S.SIDEBAR_START}
                 disabled={navigating}
                 className="flex-1 bg-transparent outline-none text-sm"
                 style={{ color:'rgba(255,255,255,0.85)', caretColor:'#60a5fa' }}
@@ -482,7 +396,7 @@ function LeftPanel({
               <input
                 value={toLocation}
                 onChange={e => setToLocation(e.target.value)}
-                placeholder="Where to?"
+                aria-label={S.SIDEBAR_END} placeholder={S.SIDEBAR_END}
                 disabled={navigating}
                 className="flex-1 bg-transparent outline-none text-sm"
                 style={{ color:'rgba(255,255,255,0.85)', caretColor:'#f87171' }}
@@ -496,10 +410,19 @@ function LeftPanel({
           </div>
         </div>
 
+        <div className="px-4 py-2 space-y-2 text-xs text-white">
+          <select aria-label={S.SIDEBAR_MODE} disabled={navigating} value={mode} onChange={e => setMode(e.target.value)} className="w-full rounded-xl p-2 bg-[#1a1d29]">
+            {S.MODE_OPTIONS.map(label => <option key={label} value={S.MODE_TO_KEY[label]}>{label}</option>)}
+          </select>
+          <input aria-label={S.SIDEBAR_PHONE} placeholder={S.SIDEBAR_PHONE} value={phone} disabled={navigating} onChange={e => setPhone(e.target.value)} className="w-full rounded-xl p-2 bg-white/5" />
+          <label className="flex gap-2"><input type="checkbox" checked={overlayOn} onChange={e => setOverlayOn(e.target.checked)} />{S.SIDEBAR_OVERLAY}</label>
+          <p role="status">{loading ? 'Loading routes...' : error}{error && <button onClick={onRetry} className="ml-2 underline">Retry</button>}</p>
+          {navigating && <p>{S.ESCORT_POLL_LABEL}: {pollRate} s | {S.SIM_GPS} | {S.SIM_SMS} | {S.SIM_CLOUD}</p>}
+        </div>
         {/* Legend */}
         <div className="px-4 py-2.5 flex items-center justify-between flex-shrink-0"
           style={{ background:'rgba(0,0,0,0.2)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-          <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color:'rgba(255,255,255,0.3)' }}>3 Routes Found</span>
+          <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color:'rgba(255,255,255,0.3)' }}>{ROUTES.length} Routes Found</span>
           <div className="flex gap-3">
             {ROUTES.map(r => (
               <div key={r.id} className="flex items-center gap-1.5">
@@ -545,7 +468,7 @@ function LeftPanel({
                     )}
                   </div>
                   <div className="flex gap-4 mb-3">
-                    {[{ v:route.duration, l:'walk time' },{ v:route.distance, l:'distance' },{ v:String(route.safetyScore), l:'vis. score', accent:true }].map((s,i) => (
+                    {[{ v:route.duration, l:S.METRIC_ETA },{ v:route.distance, l:S.METRIC_DISTANCE },{ v:String(route.safetyScore), l:S.METRIC_MEAN_SCORE, accent:true }].map((s,i) => (
                       <div key={i} className="flex-1">
                         <div className="text-base font-bold leading-none" style={{ color:(s as any).accent?route.color:'rgba(255,255,255,0.9)' }}>{s.v}</div>
                         <div className="text-[10px] mt-0.5" style={{ color:'rgba(255,255,255,0.35)' }}>{s.l}</div>
@@ -553,7 +476,7 @@ function LeftPanel({
                     ))}
                   </div>
                   <ScoreBar score={route.safetyScore} color={route.color} />
-                  {isActive && route.highlights.map((h,i) => (
+                  {route.highlights.map((h,i) => (
                     <div key={i} className="flex items-center gap-2 text-[11px] mt-1.5" style={{ color:'rgba(255,255,255,0.5)' }}>
                       <div className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor:route.color }} />{h}
                     </div>
@@ -570,22 +493,22 @@ function LeftPanel({
           {navigating ? (
             <div className="space-y-2">
               <div className="rounded-xl px-4 py-2.5 text-center text-xs" style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.25)', color:'#22c55e' }}>
-                Navigating · {active.duration} remaining
+                Navigating · {active?.duration} estimated
               </div>
               <button onClick={onStopNav} className="w-full py-2.5 rounded-xl text-sm font-semibold"
                 style={{ background:'rgba(239,68,68,0.12)', color:'#ef4444', border:'1px solid rgba(239,68,68,0.3)' }}>
-                Stop Navigation
+                {S.NAV_STOP_BTN}
               </button>
             </div>
           ) : (
-            <button onClick={onStartNav}
+            <button disabled={!active || loading || !!error} onClick={onStartNav}
               className="w-full py-3 rounded-xl text-sm font-bold transition-all hover:brightness-110 active:scale-[0.98]"
-              style={{ backgroundColor:active.color, color:'#0f1117' }}>
-              Start {active.name} →
+              style={{ backgroundColor:active?.color, color:'#0f1117' }}>
+              {S.NAV_START_BTN} →
             </button>
           )}
           <p className="text-[10px] text-center mt-2 leading-relaxed" style={{ color:'rgba(255,255,255,0.2)' }}>
-            Lumina calculates environmental visibility factors. Not a substitute for personal vigilance.
+            {S.APP_DESCRIPTION}
           </p>
         </div>
       </div>
@@ -612,7 +535,8 @@ function LeftPanel({
 }
 
 // ─── ESCORT BANNER ────────────────────────────────────────────────────────────
-function EscortModeBanner({ sidebarOpen, onDeactivate }: { sidebarOpen: boolean; onDeactivate: () => void }) {
+function EscortModeBanner({ sidebarOpen, onDeactivate, route, notified }: { sidebarOpen: boolean; onDeactivate: () => void; route: Route; notified: boolean }) {
+  const { config: { strings: S, constants: C } } = useData();
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => { const id = setInterval(() => setElapsed(e => e+1), 1000); return () => clearInterval(id); }, []);
   const mins = Math.floor(elapsed/60).toString().padStart(2,'0');
@@ -634,7 +558,7 @@ function EscortModeBanner({ sidebarOpen, onDeactivate }: { sidebarOpen: boolean;
               <span className="text-xs font-mono text-red-400/70 tabular-nums">{mins}:{secs}</span>
             </div>
             <p className="text-xs leading-relaxed" style={{ color:'rgba(255,255,255,0.6)' }}>
-              Entering low-visibility area. Stay vigilant. Location shared with emergency contact.
+              {S.ESCORT_BANNER}
             </p>
           </div>
           <button onClick={onDeactivate} className="flex-shrink-0 text-xs px-2.5 py-1 rounded-lg"
@@ -644,9 +568,9 @@ function EscortModeBanner({ sidebarOpen, onDeactivate }: { sidebarOpen: boolean;
         </div>
         <div className="grid grid-cols-3" style={{ borderTop:'1px solid rgba(239,68,68,0.18)' }}>
           {[
-            { icon:'gps',    label:'GPS Overdrive', value:'3s interval' },
-            { icon:'signal', label:'Telemetry',     value:'Logging'     },
-            { icon:'bell',   label:'Contact',       value:'Notified'    },
+            { icon:'gps',    label:S.SIM_GPS, value:`${C.POLL_ESCORT_S} s` },
+            { icon:'signal', label:S.SIM_CLOUD, value:'Simulated'     },
+            { icon:'bell',   label:S.SIM_SMS, value:notified ? 'Recorded' : 'Pending'    },
           ].map(({ icon, label, value }) => (
             <div key={label} className="flex flex-col items-center py-2.5 text-center" style={{ borderRight:'1px solid rgba(239,68,68,0.12)' }}>
               <span className="mb-1" style={{ color:'rgba(239,68,68,0.6)' }}><Icon name={icon} size={13} color="currentColor" /></span>
@@ -660,8 +584,8 @@ function EscortModeBanner({ sidebarOpen, onDeactivate }: { sidebarOpen: boolean;
         style={{ background:'rgba(251,146,60,0.1)', border:'1px solid rgba(251,146,60,0.28)', backdropFilter:'blur(12px)' }}>
         <span style={{ color:'rgba(251,146,60,0.7)', flexShrink:0 }}><Icon name="warning" size={15} color="currentColor" /></span>
         <div>
-          <span className="text-xs font-semibold text-orange-400">Segment visibility score: 24 / 100 </span>
-          <span className="text-xs" style={{ color:'rgba(255,255,255,0.4)' }}>— below threshold of 30</span>
+          <span className="text-xs font-semibold text-orange-400">{S.METRIC_MIN_SCORE}: {route.min_score.toFixed(1)} / 100 </span>
+          <span className="text-xs" style={{ color:'rgba(255,255,255,0.4)' }}>— threshold {C.ESCORT_THRESHOLD}</span>
         </div>
       </div>
     </div>
@@ -670,6 +594,7 @@ function EscortModeBanner({ sidebarOpen, onDeactivate }: { sidebarOpen: boolean;
 
 // ─── EYES UP ──────────────────────────────────────────────────────────────────
 function EyesUpOverlay({ onUnlock }: { onUnlock: () => void }) {
+  const { config: { strings: S } } = useData();
   const lastTap = useRef<number>(0);
   function handleDoubleTap(e: React.MouseEvent | React.TouchEvent) {
     e.stopPropagation();
@@ -678,11 +603,11 @@ function EyesUpOverlay({ onUnlock }: { onUnlock: () => void }) {
     else lastTap.current = now;
   }
   return (
-    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center select-none cursor-pointer"
+    <div className="absolute inset-0 z-[160] flex flex-col items-center justify-center select-none cursor-pointer"
       style={{ background:'rgba(8,10,18,0.94)', backdropFilter:'blur(8px)' }}
       onClick={handleDoubleTap} onTouchEnd={handleDoubleTap}>
       <div className="absolute top-0 left-0 right-0 h-1 bg-white/5">
-        <div className="h-full bg-green-400/60" style={{ width:'42%' }} />
+        <div className="h-full bg-green-400/60" style={{ width:'100%' }} />
       </div>
       <div className="mb-8 relative">
         <div className="w-28 h-28 rounded-full flex items-center justify-center"
@@ -692,22 +617,22 @@ function EyesUpOverlay({ onUnlock }: { onUnlock: () => void }) {
         <div className="absolute inset-0 rounded-full animate-ping opacity-10"
           style={{ background:'rgba(255,255,255,0.3)', animationDuration:'3s' }} />
       </div>
-      <h2 className="text-2xl font-bold text-white mb-2 text-center">Route Active</h2>
+      <h2 className="text-2xl font-bold text-white mb-2 text-center">{S.EYES_UP_TITLE}</h2>
       <p className="text-base text-center mb-2 max-w-xs leading-relaxed" style={{ color:'rgba(255,255,255,0.55)' }}>
-        Keep your head up and stay aware of your surroundings.
+        {S.EYES_UP_BODY}
       </p>
-      <p className="text-sm text-center mb-10" style={{ color:'rgba(255,255,255,0.35)' }}>Audio turn-by-turn cues are enabled.</p>
+      <p className="text-sm text-center mb-10" style={{ color:'rgba(255,255,255,0.35)' }}>{S.SIM_GPS}</p>
       <div className="flex items-center gap-2.5 px-5 py-2.5 rounded-full"
         style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)' }}>
         <Icon name="finger" size={15} color="rgba(255,255,255,0.5)" />
-        <span className="text-sm" style={{ color:'rgba(255,255,255,0.5)' }}>Double-tap anywhere to view map</span>
+        <button onClick={e => { e.stopPropagation(); onUnlock(); }} className="text-sm" style={{ color:'rgba(255,255,255,0.5)' }}>{S.EYES_UP_UNLOCK}</button>
       </div>
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 rounded-2xl px-5 py-3 flex items-center gap-3"
         style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', backdropFilter:'blur(12px)' }}>
         <Icon name="turnRight" size={18} color="rgba(255,255,255,0.6)" />
         <div>
-          <div className="text-xs text-white font-semibold">Turn right in 120m</div>
-          <div className="text-[10px]" style={{ color:'rgba(255,255,255,0.4)' }}>onto Brigade Road</div>
+          <div className="text-xs text-white font-semibold">{S.NAV_PROGRESS}</div>
+          <div className="text-[10px]" style={{ color:'rgba(255,255,255,0.4)' }}>{S.ESCORT_SIMULATED_NOTE}</div>
         </div>
       </div>
     </div>
@@ -716,7 +641,9 @@ function EyesUpOverlay({ onUnlock }: { onUnlock: () => void }) {
 
 // ─── ROUTE STATS ──────────────────────────────────────────────────────────────
 function RouteStatsPanel({ activeRoute, setActiveRoute }: { activeRoute: string; setActiveRoute: (id: string) => void }) {
-  const route = ROUTES.find(r => r.id === activeRoute)!;
+  const { routes: ROUTES, config: { strings: S } } = useData();
+  const route = ROUTES.find(r => r.id === activeRoute);
+  if (!route) return null;
   const scoreColor = route.safetyScore >= 80 ? '#22c55e' : route.safetyScore >= 60 ? '#fb923c' : '#ef4444';
   return (
     <div className="absolute right-0 top-0 bottom-16 z-30 w-[420px] flex flex-col"
@@ -752,7 +679,7 @@ function RouteStatsPanel({ activeRoute, setActiveRoute }: { activeRoute: string;
             </div>
             <div className="text-xs mb-2.5" style={{ color:'rgba(255,255,255,0.45)' }}>{route.tagline}</div>
             <div className="flex gap-4">
-              {[{ v:route.duration, l:'time' },{ v:route.distance, l:'distance' }].map(({ v, l }) => (
+              {[{ v:route.duration, l:'time' },{ v:route.distance, l:S.METRIC_DISTANCE }].map(({ v, l }) => (
                 <div key={l}><div className="text-sm font-bold text-white">{v}</div><div className="text-[10px]" style={{ color:'rgba(255,255,255,0.35)' }}>{l}</div></div>
               ))}
             </div>
@@ -761,9 +688,9 @@ function RouteStatsPanel({ activeRoute, setActiveRoute }: { activeRoute: string;
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color:'rgba(255,255,255,0.3)' }}>Visibility Factors</div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color:'rgba(255,255,255,0.3)' }}>{S.METRIC_MEAN_SCORE}</div>
           <div className="space-y-3">
-            {[{ label:'Street Lighting', score:route.safetyScore-4, icon:'bulb' },{ label:'Active Businesses', score:route.safetyScore+2, icon:'store' },{ label:'Foot Traffic', score:route.safetyScore-8, icon:'walk' },{ label:'Transit Proximity', score:route.safetyScore-2, icon:'bus' }].map(({ label, score, icon }) => (
+            {[{ label:S.METRIC_MEAN_SCORE, score:route.mean_score, icon:'eye' },{ label:S.METRIC_MIN_SCORE, score:route.min_score, icon:'eye' }].map(({ label, score, icon }) => (
               <div key={label}>
                 <div className="flex justify-between items-center mb-1.5">
                   <div className="flex items-center gap-2 text-xs" style={{ color:'rgba(255,255,255,0.6)' }}>
@@ -777,7 +704,7 @@ function RouteStatsPanel({ activeRoute, setActiveRoute }: { activeRoute: string;
           </div>
         </div>
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color:'rgba(255,255,255,0.3)' }}>Segment Breakdown</div>
+          <div className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color:'rgba(255,255,255,0.3)' }}>{S.METRIC_LOW_SEGS}: {route.n_low_segments}</div>
           <div className="space-y-2">
             {route.segments.map((seg, i) => {
               const c = seg.score>=80?'#22c55e':seg.score>=60?'#fb923c':'#ef4444';
@@ -857,99 +784,167 @@ function BottomNav({ screen, setScreen, escortActive }: { screen: Screen; setScr
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [termsAccepted, setTermsAccepted]     = useState(false);
-  const [showTermsModal, setShowTermsModal]   = useState(true);
-  const [screen, setScreen]                   = useState<Screen>('map');
-  const [activeRoute, setActiveRoute]         = useState('visibility');
-  const [settingsOpen, setSettingsOpen]       = useState(false);
-  const [accountPanel, setAccountPanel]       = useState<AccountPanel>(null);
-  const [now, setNow]                         = useState(() => new Date());
-  const [sidebarOpen, setSidebarOpen]         = useState(true);
-  const [navigating, setNavigating]           = useState(false);
-  const [escortActive, setEscortActive]       = useState(false);
-  const [fromLocation, setFromLocation]       = useState('MG Road Metro Station');
-  const [toLocation, setToLocation]           = useState('Trinity Circle');
-  const navTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const escortTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const [config, setConfig] = useState<Config | null>(null);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
+    const controller = new AbortController();
+    setError('');
+    getConfig(controller.signal).then(setConfig).catch(() => { if (!controller.signal.aborted) setError("Can't reach the server"); });
+    return () => controller.abort();
+  }, [attempt]);
+  if (!config) return <div className="w-screen h-screen flex flex-col items-center justify-center text-white bg-[#0f1117]" role="status">
+    {error || 'Loading...'}{error && <button className="mt-4 rounded-xl px-4 py-3 bg-white/10" onClick={() => setAttempt(a => a + 1)}>Retry</button>}
+  </div>;
+  return <Lumina config={config} />;
+}
+
+function Lumina({ config }: { config: Config }) {
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(true);
+  const [screen, setScreen] = useState<Screen>('map');
+  const [activeRoute, selectRoute] = useState('visibility');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountPanel, setAccountPanel] = useState<AccountPanel>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [navigating, setNavigating] = useState(false);
+  const [fromLocation, setFromLocation] = useState(config.default_start.join(', '));
+  const [toLocation, setToLocation] = useState(config.default_end.join(', '));
+  const [ROUTES, setRoutes] = useState<Route[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [mode, setMode] = useState('walk');
+  const [routeAttempt, setRouteAttempt] = useState(0);
+  const [phone, setPhone] = useState('');
+  const [overlayOn, setOverlayOn] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [overlayError, setOverlayError] = useState('');
+  const [position, setPosition] = useState<Coordinate | null>(null);
+  const [notified, setNotified] = useState(false);
+  const [navError, setNavError] = useState('');
+  const [unlockUntil, setUnlockUntil] = useState(0);
+  const [eyesDim, setEyesDim] = useState(false);
+  const navSession = useRef<AbortController | null>(null);
+  const starting = useRef(false);
+  const selected = ROUTES.find(r => r.id === activeRoute);
+  const escortActive = navigating && !!selected?.needs_escort;
+  const pollRate = escortActive ? config.constants.POLL_ESCORT_S : config.constants.POLL_NORMAL_S;
+  const setActiveRoute = (id: string) => { if (!navigating && !starting.current) { selectRoute(id); setPosition(null); } };
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
   }, []);
-
-  const phase    = useMemo(() => getDayPhase(now), [now]);
-  const sunTimes = useMemo(() => getTimes(now, BANGALORE_LAT, BANGALORE_LNG), [now]);
-
-  const startNavigation = useCallback(() => {
-    setNavigating(true);
-    setSidebarOpen(false);
-    setScreen('map');
-
-    navTimerRef.current = setTimeout(() => {
-      setScreen('eyesup');
-    }, 7_000);
-
-    const route = ROUTES.find(r => r.id === activeRoute);
-    if (route?.dangerSegment) {
-      escortTimerRef.current = setTimeout(() => {
-        setEscortActive(true);
-        setScreen('escort');
-      }, 8_000);
-    }
-  }, [activeRoute]);
-
-  const rearmRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const stopNavigation = useCallback(() => {
-    setNavigating(false);
-    setEscortActive(false);
-    setSidebarOpen(true);
-    setScreen('map');
-    if (navTimerRef.current)    clearTimeout(navTimerRef.current);
-    if (escortTimerRef.current) clearTimeout(escortTimerRef.current);
-    if (rearmRef.current)       clearTimeout(rearmRef.current);
-  }, []);
-
   useEffect(() => {
-    if (screen === 'escort') setEscortActive(true);
-  }, [screen]);
-
-  const dismissEyesUp = useCallback(() => {
-    setScreen('map');
-    if (rearmRef.current) clearTimeout(rearmRef.current);
-    rearmRef.current = setTimeout(() => { setScreen('eyesup'); }, 7_000);
+    if (!termsAccepted) return;
+    const controller = new AbortController();
+    setRoutes([]); setPosition(null); setError(''); setLoading(true);
+    const timer = setTimeout(async () => {
+      const start = parseCoordinate(fromLocation), end = parseCoordinate(toLocation);
+      if (!start || !end) { setError('No route found'); setLoading(false); return; }
+      try {
+        const response = await getRoutes(start, end, mode, controller.signal);
+        if (controller.signal.aborted) return;
+        const routes = response.routes.filter(r => r.coords.length > 0).map(r => adaptRoute(r, config.strings));
+        setRoutes(routes);
+        selectRoute(current => routes.some(r => r.id === current) ? current : routes[0]?.id || 'visibility');
+        if (!routes.length) setError('No route found');
+      } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
+      finally { if (!controller.signal.aborted) setLoading(false); }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [fromLocation, toLocation, mode, config, termsAccepted, routeAttempt]);
+  useEffect(() => {
+    if (!overlayOn || !termsAccepted) return;
+    const controller = new AbortController();
+    setOverlayError('');
+    getOverlay(controller.signal).then(data => { if (!controller.signal.aborted) setOverlay(data); })
+      .catch((e: Error) => { if (!controller.signal.aborted) setOverlayError(e.message); });
+    return () => controller.abort();
+  }, [overlayOn, termsAccepted]);
+  const center = config.map_center;
+  const phase = useMemo(() => getDayPhase(now, center), [now, center]);
+  const sunTimes = useMemo(() => getTimes(now, ...center), [now, center]);
+  const stopNavigation = useCallback(() => {
+    navSession.current?.abort(); starting.current = false;
+    setNavigating(false); setSidebarOpen(true); setEyesDim(false); setScreen('map');
   }, []);
+  const startNavigation = () => {
+    if (!termsAccepted || !selected || loading || error || navigating || starting.current) return;
+    starting.current = true;
+    navSession.current?.abort();
+    const controller = new AbortController(); navSession.current = controller;
+    setNavError(''); setNotified(false); setPosition(selected.coords[0]);
+    setUnlockUntil(0); setEyesDim(false); setNavigating(true); setSidebarOpen(false); setScreen('map');
+    if (selected.needs_escort) {
+      postNotify(phone, selected.id, controller.signal).then(() => {
+        if (!controller.signal.aborted) setNotified(true);
+      }).catch((e: Error) => { if (!controller.signal.aborted) setNavError(e.message + ' ? ' + config.strings.ERR_CONTACT); });
+    }
+  };
+  useEffect(() => {
+    if (!navigating || !selected) return;
+    let index = 0;
+    const controller = navSession.current!;
+    const tick = setInterval(() => {
+      if (controller.signal.aborted) return;
+      if (index >= selected.coords.length) { stopNavigation(); return; }
+      const point = selected.coords[index++];
+      setPosition(point);
+      postTelemetry({ lat: point[0], lon: point[1], route_id: selected.id, escort_active: selected.needs_escort }, controller.signal)
+        .catch((e: Error) => {
+          if (!controller.signal.aborted) { setNavError(e.message + ' ? ' + config.strings.ERR_TELEMETRY); stopNavigation(); }
+        });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [navigating, selected, config, stopNavigation]);
+  useEffect(() => () => { navSession.current?.abort(); }, []);
+  useEffect(() => {
+    if (!navigating) return;
+    const delay = unlockUntil ? Math.max(0, unlockUntil - Date.now()) : config.constants.EYES_UP_DELAY_S * 1000;
+    const timer = setTimeout(() => {
+      setEyesDim(true);
+      if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(config.strings.EYES_UP_AUDIO_CUE));
+    }, delay);
+    return () => { clearTimeout(timer); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  }, [navigating, unlockUntil, config]);
+  const dismissEyesUp = () => { setEyesDim(false); setScreen('map'); if (navigating) setUnlockUntil(Date.now() + 10000); };
   const handleAcceptTerms = () => { setTermsAccepted(true); setShowTermsModal(false); };
 
   return (
+    <DataContext.Provider value={{ config, routes: ROUTES }}>
     <div className="relative w-screen h-screen overflow-hidden"
       style={{ background:'#0f1117', fontFamily:"'DM Sans','Inter',sans-serif" }}>
 
+      <div inert={!termsAccepted || showTermsModal} style={{ display: 'contents' }}>
       {/* Map */}
-      <MapContainer center={[12.972, 77.6095]} zoom={15} zoomControl={false}
-        style={{ position:'absolute', inset:0, zIndex:0 }} attributionControl={false}>
-        <TileLayer url={TILE[phase].url} />
+      {termsAccepted && <MapContainer center={config.map_center} zoom={15} zoomControl={false}
+        style={{ position:'absolute', inset:0, zIndex:0 }}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
         <MapFocus activeId={activeRoute} />
-        {ROUTES.filter(r => r.id !== activeRoute).map(r => (
-          <Polyline key={r.id} positions={r.coords as [number,number][]}
-            pathOptions={{ color:r.color, weight:5, opacity:0.28, dashArray:'8 6' }}
-            eventHandlers={{ click: () => !navigating && setActiveRoute(r.id) }} />
-        ))}
-        <Polyline positions={ROUTES.find(r => r.id === activeRoute)!.coords as [number,number][]}
-          pathOptions={{ color:ROUTES.find(r => r.id === activeRoute)!.color, weight:7, opacity:1 }} />
-        <Marker position={[12.976, 77.607]} icon={dotIcon('#60a5fa')}><Popup>MG Road Metro Station</Popup></Marker>
-        <Marker position={[12.9685, 77.6145]} icon={dotIcon('#f87171')}><Popup>Trinity Circle</Popup></Marker>
-      </MapContainer>
+        {overlayOn && overlay?.features.map((feature, i) => <Polyline key={`segment-${i}`} positions={feature.geometry.coordinates}
+          pathOptions={{ color:`hsl(${Math.max(0, Math.min(100, feature.properties.mean_score)) * 1.2}, 80%, 45%)`, weight:4, opacity:0.65 }} />)}
+        {ROUTES.filter(r => r.id === 'visibility').map(r => <Polyline key={`glow-${r.id}`} positions={r.coords} pathOptions={{ color:r.color, weight:18, opacity:0.25 }} />)}
+        {[...ROUTES.filter(r => r.id !== activeRoute), ...ROUTES.filter(r => r.id === activeRoute)].map(r => <Polyline key={r.id} positions={r.coords}
+          pathOptions={{ color:r.color, weight:r.id === activeRoute ? 7 : 5, opacity:r.id === activeRoute ? 1 : 0.55 }} eventHandlers={{ click:() => setActiveRoute(r.id) }} />)}
+        {selected && <>
+          <Marker position={selected.coords[0]} icon={dotIcon('#60a5fa')}><Popup>{config.strings.SIDEBAR_START}</Popup></Marker>
+          <Marker position={selected.coords[selected.coords.length - 1]} icon={dotIcon('#f87171')}><Popup>{config.strings.SIDEBAR_END}</Popup></Marker>
+        </>}
+        {position && <Marker position={position} icon={dotIcon('#ffffff', 16)}><Popup>{config.strings.SIM_GPS}</Popup></Marker>}
+      </MapContainer>}
 
-      {screen === 'eyesup' && (
+      {eyesDim && (
         <div className="absolute inset-0 z-10" style={{ background:'rgba(8,10,18,0.82)', backdropFilter:'blur(3px)' }} />
       )}
-      <div className="absolute bottom-2 right-2 z-10 text-[10px] pointer-events-none" style={{ color:'rgba(255,255,255,0.2)' }}>
-        © OpenStreetMap · © CARTO
+      <div className="absolute bottom-[66px] right-2 z-20 text-[10px]" style={{ color:'rgba(255,255,255,0.6)' }}>
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
       </div>
 
       {/* Sidebar */}
       <LeftPanel
+        loading={loading} error={error || overlayError} mode={mode} setMode={setMode}
+        overlayOn={overlayOn} setOverlayOn={setOverlayOn} phone={phone} setPhone={setPhone} pollRate={pollRate} onRetry={() => { setNavError(''); setOverlayError(''); setOverlayOn(false); setRouteAttempt(a => a + 1); }}
         activeRoute={activeRoute} setActiveRoute={setActiveRoute}
         phase={phase} now={now} sunTimes={sunTimes}
         navigating={navigating} onStartNav={startNavigation} onStopNav={stopNavigation}
@@ -958,14 +953,14 @@ export default function App() {
         toLocation={toLocation} setToLocation={setToLocation}
       />
 
-      {screen === 'escort' && escortActive && (
-        <EscortModeBanner sidebarOpen={sidebarOpen} onDeactivate={() => { setEscortActive(false); setScreen('map'); }} />
+      {escortActive && selected && (
+        <EscortModeBanner route={selected} notified={notified} sidebarOpen={sidebarOpen} onDeactivate={stopNavigation} />
       )}
-      {screen === 'eyesup' && <EyesUpOverlay onUnlock={dismissEyesUp} />}
+      {(eyesDim || screen === 'eyesup') && <EyesUpOverlay onUnlock={dismissEyesUp} />}
       {screen === 'stats'  && <RouteStatsPanel activeRoute={activeRoute} setActiveRoute={setActiveRoute} />}
 
       {/* Active route badge */}
-      {screen === 'map' && !navigating && (() => {
+      {screen === 'map' && !navigating && selected && (() => {
         const a = ROUTES.find(r => r.id === activeRoute)!;
         return (
           <div className="absolute top-4 z-30 pointer-events-none"
@@ -992,7 +987,7 @@ export default function App() {
           <div className="rounded-full px-4 py-1.5 flex items-center gap-2"
             style={{ background:'rgba(19,21,31,0.8)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.1)' }}>
             <Icon name="pin" size={13} color="rgba(255,255,255,0.5)" />
-            <span className="text-xs font-medium" style={{ color:'rgba(255,255,255,0.7)' }}>MG Road, Bengaluru</span>
+            <span className="text-xs font-medium" style={{ color:'rgba(255,255,255,0.7)' }}>{config.map_center.join(', ')}</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1"
               style={{ background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.4)' }}>
               <PhaseIcon phase={phase} />{TILE[phase].label}
@@ -1009,7 +1004,7 @@ export default function App() {
             background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)',
             boxShadow: settingsOpen ? '0 0 0 2px rgba(139,92,246,0.5)' : '0 2px 8px rgba(0,0,0,0.4)',
           }}>
-          AK
+          L
         </button>
         {settingsOpen && (
           <SettingsMenu
@@ -1020,15 +1015,22 @@ export default function App() {
         )}
       </div>
 
-      <BottomNav screen={screen} setScreen={setScreen} escortActive={escortActive} />
+      <BottomNav screen={screen} setScreen={s => { if (s !== 'eyesup' || navigating) setScreen(s); }} escortActive={escortActive} />
 
+      {navigating && <div className="absolute bottom-20 left-4 z-30 rounded-xl px-4 py-3 text-xs text-white bg-[#13151f]">
+        {config.strings.ESCORT_POLL_LABEL}: {pollRate} s | {config.strings.SIM_GPS} | {config.strings.SIM_SMS} | {config.strings.SIM_CLOUD}
+        <button className="ml-3 text-red-400" onClick={stopNavigation}>{config.strings.NAV_STOP_BTN}</button>
+      </div>}
+      {navError && <div role="alert" className="absolute bottom-36 left-4 z-[170] rounded-xl px-4 py-3 text-sm text-red-400 bg-[#13151f]">{navError}</div>}
       {accountPanel && <AccountPanelModal panel={accountPanel} onClose={() => setAccountPanel(null)} />}
+      </div>
       {showTermsModal && (
         <TermsModal
           onAccept={!termsAccepted ? handleAcceptTerms : undefined}
-          onClose={() => setShowTermsModal(false)}
+          onClose={() => { if (termsAccepted) setShowTermsModal(false); }}
         />
       )}
     </div>
+    </DataContext.Provider>
   );
 }
